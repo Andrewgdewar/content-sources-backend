@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/RedHatInsights/event-schemas-go/apps/repositories/v1"
 	"github.com/content-services/content-sources-backend/pkg/api"
 	ce "github.com/content-services/content-sources-backend/pkg/errors"
 	"github.com/content-services/content-sources-backend/pkg/models"
+	"github.com/content-services/content-sources-backend/pkg/notifications"
 	"github.com/content-services/yummy/pkg/yum"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -229,6 +232,21 @@ func (r repositoryConfigDaoImpl) List(
 	return api.RepositoryCollectionResponse{Data: repos}, totalRepos, nil
 }
 
+func (r repositoryConfigDaoImpl) InternalOnly_ListRepoConfigsByUUID(uuid string) []api.RepositoryResponse {
+	repoConfigs := make([]models.RepositoryConfiguration, 0)
+	filteredDB := r.db.Where("repositories.uuid = ?", uuid).
+		Joins("inner join repositories on repository_configurations.repository_uuid = repositories.uuid")
+
+	filteredDB.Find(&repoConfigs).Preload("Repository")
+
+	if filteredDB.Error != nil {
+		log.Error().Msgf("Unable to ListRepos: %v", uuid)
+		return []api.RepositoryResponse{}
+	}
+
+	return convertToResponses(repoConfigs)
+}
+
 func (r repositoryConfigDaoImpl) Fetch(orgID string, uuid string) (api.RepositoryResponse, error) {
 	repo := api.RepositoryResponse{}
 	repoConfig, err := r.fetchRepoConfig(orgID, uuid)
@@ -286,6 +304,7 @@ func (r repositoryConfigDaoImpl) Update(orgID string, uuid string, repoParams ap
 	if repoConfig, err = r.fetchRepoConfig(orgID, uuid); err != nil {
 		return err
 	}
+
 	ApiFieldsToModel(repoParams, &repoConfig, &repo)
 
 	// If URL is included in params, search for existing
@@ -300,10 +319,19 @@ func (r repositoryConfigDaoImpl) Update(orgID string, uuid string, repoParams ap
 		repoConfig.RepositoryUUID = repo.UUID
 	}
 
+	copyForNotifications := repoConfig
 	repoConfig.Repository = models.Repository{}
 	if err := r.db.Model(&repoConfig).Updates(repoConfig.MapForUpdate()).Error; err != nil {
 		return DBErrorToApi(err)
+	} else {
+		//Send update notification
+		notifications.SendNotification(
+			orgID,
+			notifications.RepositoryUpdated,
+			[]repositories.Repositories{notifications.MapRepositoryConfig(copyForNotifications)},
+		)
 	}
+
 	return nil
 }
 
@@ -332,6 +360,13 @@ func (r repositoryConfigDaoImpl) Delete(orgID string, uuid string) error {
 
 	if err = r.db.Delete(&repoConfig).Error; err != nil {
 		return err
+	} else {
+		//Send delete notification
+		notifications.SendNotification(
+			orgID,
+			notifications.RepositoryDeleted,
+			[]repositories.Repositories{notifications.MapRepositoryConfig(repoConfig)},
+		)
 	}
 	return nil
 }

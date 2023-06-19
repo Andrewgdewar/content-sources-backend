@@ -8,13 +8,13 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/content-services/content-sources-backend/pkg/api"
 	"github.com/content-services/content-sources-backend/pkg/config"
+	"github.com/content-services/content-sources-backend/pkg/models"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
 func SendNotification(orgId string, eventName EventName, repos []repositories.Repositories) {
 	if config.Get().NotificationsClient != nil {
-		log.Warn().Msgf("Notification started: %v", config.Get().NotificationsClient)
 		eventNameStr := eventName.String()
 		newUUID, _ := uuid.NewRandom()
 		e := cloudevents.NewEvent()
@@ -40,8 +40,6 @@ func SendNotification(orgId string, eventName EventName, repos []repositories.Re
 		if result := config.Get().NotificationsClient.Send(ctx, e); cloudevents.IsUndelivered(result) {
 			log.Error().Msgf("Notification message failed to send: %v", result)
 			return
-		} else {
-			log.Warn().Msgf("Notification message accepted: %t", cloudevents.IsACK(result))
 		}
 		ctx.Done()
 	} else {
@@ -68,6 +66,28 @@ func MapRepositoryResponse(importedRepo api.RepositoryResponse) repositories.Rep
 		LastSuccessIntrospectionTime: SetEmptyToNil(importedRepo.LastIntrospectionSuccessTime),
 		LastUpdateIntrospectionTime:  SetEmptyToNil(importedRepo.LastIntrospectionUpdateTime),
 		Status:                       SetEmptyToNil(importedRepo.Status),
+	}
+}
+
+func MapRepositoryConfig(importedRepo models.RepositoryConfiguration) repositories.Repositories {
+	packageCount := int64(importedRepo.Repository.PackageCount)
+	failedIntrospectionsCount := int64(importedRepo.Repository.FailedIntrospectionsCount)
+
+	return repositories.Repositories{
+		Name:                         importedRepo.Name,
+		URL:                          importedRepo.Repository.URL,
+		UUID:                         importedRepo.UUID,
+		DistributionVersions:         importedRepo.Versions,
+		FailedIntrospectionsCount:    &failedIntrospectionsCount,         // Optional but defaults to 0
+		PackageCount:                 &packageCount,                      // Optional but defaults to 0
+		MetadataVerification:         &importedRepo.MetadataVerification, // Optional but defaults to false
+		DistributionArch:             SetEmptyToNil(importedRepo.Arch),   // Below are all optional, we need to set them as nil if empty for the cloud schema
+		GPGKey:                       SetEmptyToNil(importedRepo.GpgKey),
+		LastIntrospectionError:       SetEmptyToNil(*importedRepo.Repository.LastIntrospectionError),
+		LastIntrospectionTime:        SetEmptyToNil(importedRepo.Repository.LastIntrospectionTime.String()),
+		LastSuccessIntrospectionTime: SetEmptyToNil(importedRepo.Repository.LastIntrospectionSuccessTime.String()),
+		LastUpdateIntrospectionTime:  SetEmptyToNil(importedRepo.Repository.LastIntrospectionUpdateTime.String()),
+		Status:                       SetEmptyToNil(importedRepo.Repository.Status),
 	}
 }
 
