@@ -54,39 +54,34 @@ func (pdh *PulpDistributionHelper) CreateOrUpdateDistribution(orgId, distName, d
 		return "", addedContentGuard, err
 	}
 
+	var contentGuardHref *string
+	if orgId != config.RedHatOrg && config.Get().Clients.Pulp.CustomRepoContentGuards {
+		href, err := pdh.FetchContentGuard(orgId)
+		if err != nil {
+			return "", addedContentGuard, err
+		}
+		contentGuardHref = href
+		addedContentGuard = true
+	}
+
 	if resp == nil {
 		distTask, err = pdh.CreateDistribution(orgId, publicationHref, distName, distPath)
 		if err != nil {
 			return "", addedContentGuard, err
 		}
-	} else {
-		var contentGuardHref *string
-		if orgId != config.RedHatOrg && config.Get().Clients.Pulp.CustomRepoContentGuards {
-			href, err := pdh.FetchContentGuard(orgId)
-			if err != nil {
-				return "", addedContentGuard, err
-			}
-			contentGuardHref = href
-			addedContentGuard = true
+		distHrefPtr := pulp_client.SelectRpmDistributionHref(distTask)
+		if distHrefPtr == nil {
+			return "", false, fmt.Errorf("could not find a distribution href in task: %v", distTask.PulpHref)
 		}
-
-		taskHref, err := pdh.pulpClient.UpdateRpmDistribution(pdh.ctx, *resp.PulpHref, publicationHref, distName, distPath, contentGuardHref)
-		if err != nil {
-			return "", addedContentGuard, err
-		}
-
-		distTask, err = pdh.pulpClient.PollTask(pdh.ctx, taskHref)
-		if err != nil {
-			return "", addedContentGuard, err
-		}
+		return *distHrefPtr, addedContentGuard, err
 	}
 
-	distHrefPtr := pulp_client.SelectRpmDistributionHref(distTask)
-	if distHrefPtr == nil {
-		return "", false, fmt.Errorf("could not find a distribution href in task: %v", distTask.PulpHref)
+	_, err = pdh.pulpClient.UpdateRpmDistribution(pdh.ctx, *resp.PulpHref, publicationHref, distName, distPath, contentGuardHref)
+	if err != nil {
+		return "", addedContentGuard, err
 	}
 
-	return *distHrefPtr, addedContentGuard, err
+	return *resp.PulpHref, addedContentGuard, err
 }
 
 func (pdh *PulpDistributionHelper) FetchContentGuard(orgId string) (*string, error) {
