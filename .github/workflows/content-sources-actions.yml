@@ -16,7 +16,7 @@ on:
 jobs:
   playwright-tests:
     runs-on:
-      - codebuild-content-services-backend-repo-${{ github.run_id }}-${{ github.run_attempt }}
+      - codebuild-content-services-backend-repo-${{ github.action }}-${{ github.run_id }}-${{ github.run_attempt }}
       - instance-size:small
       - buildspec-override:true
 
